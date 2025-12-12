@@ -1,2 +1,1 @@
-# nms_hook_LL
-No Man's Sky Glitchbuilding Tool
+"# nms_hook_LL" 
