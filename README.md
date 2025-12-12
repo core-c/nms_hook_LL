@@ -1,4 +1,4 @@
-"# nms_hook_LL" 
+# nms_hook_LL
 
 This is a "No Man's Sky" Glitchbuilding Tool.
 
