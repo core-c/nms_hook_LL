@@ -1,179 +1,164 @@
 #include <windows.h>
 #include <stdio.h>
-
+#include <stdint.h>
 
 #define COLOR_DEFAULT (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)
 #define COLOR_ERROR (FOREGROUND_RED | FOREGROUND_INTENSITY)
 #define COLOR_OK (FOREGROUND_GREEN | FOREGROUND_INTENSITY)
-#define COLOR_TITLE (BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE)
+#define COLOR_TITLE (BACKGROUND_RED | BACKGROUND_GREEN)
+#define COLOR_TIMINGS (FOREGROUND_RED | FOREGROUND_GREEN)
 
-// Timing values can be read from file.
+
+// The variables for the timing values can be overwritten with data read from a file.
+// That file is a simple .txt file with a line, with 3 timing-values, for each delay.
+// There are 3 delays, so there are 3 lines in the file.
+// Each line contains 3 numbers (durations in microseconds).
+// The first line contains the delay for the wire glitch. The default values are: 1000 62400 78000.
+// The second line contains the delay for the cache glitch. The default values are: 46800 78000 78000.
+// The third line contains the delay for the adjacency glitch. The default values are: 1000 62400 78000.
+//
 // '#define' or '#undef' to select a different compiled version.
 #undef VALUES_FROM_FILE
-//
+
 #if defined(VALUES_FROM_FILE)
 #include <fstream>
 #endif
 
 
-/*
-// reference: sleep_for(), sleep_until(), ...
-#include <chrono>
-#include <thread>
-{
-    using namespace std::this_thread; // sleep_for, sleep_until
-    using namespace std::chrono; // nanoseconds, system_clock, seconds
-    sleep_for(milliseconds(delayMS_WireGlitch));
-}
-*/
 
+// The message types for inter-app communication
+#define MSG_DO_CACHEGLITCH 1
+#define MSG_DO_WIREGLITCH 2
+#define MSG_DO_ADJACENCYGLITCH 3
 
-// These are the default values.
-#define DELAYMS_WIREGLITCH 0;
-#define DELAYMS_CACHEGLITCH 3;
-
-// The variables values can be overwritten from data read from a file
-int delay_WireGlitch = DELAYMS_WIREGLITCH;
-int delay_CacheGlitch = DELAYMS_CACHEGLITCH;
+// The timing value variables. Units are microseconds.
+int delay_WireGlitch[3]         = { 1000, 50000, 50000 };
+int delay_CacheGlitch[3]        = {  500, 50000, 50000 };
+int delay_AdjacencyGlitch[3]    = { 1000, 50000, 50000 };
 
 
 HHOOK hMouseHook;           // handle to the hooked procedure
 DWORD NMSthreadId;          // threadId of NMS
 DWORD InstallerThreadId;    // threadId of the installer thread
+int64_t qpcFrequency;       // Performance Frequency
 
 
 
-
-// print a colored text to the console
-void printColored(const char* txt, WORD color) {
+// print a colored text to the console.
+// We print the linebreak(s) in the default color to prevent wrong coloring while the console is scrolling.
+void printColored(WORD color, const char* txt, const char* linebreaks) {
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTextAttribute(hConsole, color);
     printf(txt);
     SetConsoleTextAttribute(hConsole, COLOR_DEFAULT); // restore
+    printf(linebreaks);
 }
 
-int errorOut(int errorCode, const char* txt) {
-    printColored(txt, COLOR_ERROR);
+// print an error message and wait for a key...
+int errorOut(int errorCode, const char* txt, const char* linebreaks) {
+    printColored(COLOR_ERROR, txt, linebreaks);
     printf("\n\n");
     system("pause");
     return errorCode;
 }
 
+void printTimings() {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, COLOR_TIMINGS);
+    printf("      Wire Glitch: %d %d %d  \n", delay_WireGlitch[0], delay_WireGlitch[1], delay_WireGlitch[2]);
+    printf("     Cache Glitch: %d %d %d  \n", delay_CacheGlitch[0], delay_CacheGlitch[1], delay_CacheGlitch[2]);
+    printf(" Adjacency Glitch: %d %d %d  ", delay_AdjacencyGlitch[0], delay_AdjacencyGlitch[1], delay_AdjacencyGlitch[2]);
+    SetConsoleTextAttribute(hConsole, COLOR_DEFAULT); // restore
+    printf("\n");
+}
 
-int WireGlitch() {
-    UINT nSent;
+// Sleep() does not wait for milliseconds at all.
+// I measured 0.015 seconds for what was supposed to be a 1ms delay.
+// And Sleep() delay also varies. It is not consistent => useless for our purpose.
+// So, therefore this blocking delay function.
+void delayUS(int us) {
+    const int64_t overhead = 7; // 7 ticks overhead for checking/exiting the function
+    int64_t qpcStart, qpcCurrent, qpcEnd, ticks;
+    double nSeconds = us * 0.000001f;
+    if (QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&qpcStart))) {
+        ticks = static_cast<int64_t>(nSeconds * qpcFrequency) - overhead;
+        qpcEnd = qpcStart + ticks;
+        while (QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&qpcCurrent))) {
+            if (qpcCurrent >= qpcEnd) break;
+        }
+    }
+}
+
+// restict timing values in the range [0..100000] microseconds.
+int argToTiming(const char* arg) {
+    int result = max(0, min(atoi(arg), 100000));
+    return result;
+}
+
+// Send a key down/up for a given scancode
+bool SendInput_Key(UINT scancode, DWORD up = 0) {
     INPUT inputs[1] = {};
-    UINT scanCodeQ = MapVirtualKeyA('Q', MAPVK_VK_TO_VSC);
-
-    // send Q down
     ZeroMemory(inputs, sizeof(inputs));
     inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE;
-    inputs[0].ki.wScan = scanCodeQ;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 1;
-    }
+    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE | up;
+    inputs[0].ki.wScan = scancode;
+    return (SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT)) == ARRAYSIZE(inputs));
+}
 
-    if (delay_WireGlitch > 0) Sleep(delay_WireGlitch);
-
-    // send LMB down
+// send a mouse-button press/release
+bool SendInput_Mouse(DWORD button) {
+    INPUT inputs[1] = {};
     ZeroMemory(inputs, sizeof(inputs));
     inputs[0].type = INPUT_MOUSE;
-    inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 3;
-    }
-
-    Sleep(4);
-
-    // send Q up
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-    inputs[0].ki.wScan = scanCodeQ;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 2;
-    }
-
-    Sleep(5);
-
-    // send LMB up
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_MOUSE;
-    inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 4;
-    }
-
-    return 0;
+    inputs[0].mi.dwFlags = button;
+    return (SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT)) == ARRAYSIZE(inputs));
 }
 
 
-int CacheGlitch() {
-    UINT nSent;
-    INPUT inputs[1] = {};
+// This is the actual wire glitch: 'Q' + LMB
+bool DoWireGlitch() {
+    UINT scanCodeQ = MapVirtualKeyA('Q', MAPVK_VK_TO_VSC);
+
+    if (!SendInput_Key(scanCodeQ)) return FALSE;
+    if (delay_WireGlitch[0] > 0) delayUS(delay_WireGlitch[0]);
+    if (!SendInput_Mouse(MOUSEEVENTF_LEFTDOWN)) return FALSE;
+    if (delay_WireGlitch[1] > 0) delayUS(delay_WireGlitch[1]);
+    if (!SendInput_Key(scanCodeQ, KEYEVENTF_KEYUP)) return FALSE;
+    if (delay_WireGlitch[2] > 0) delayUS(delay_WireGlitch[2]);
+    if (!SendInput_Mouse(MOUSEEVENTF_LEFTUP)) return FALSE;
+
+    return TRUE;
+}
+
+// This is the actual cache glitch: 'Q' + 'C'
+bool DoCacheGlitch() {
     UINT scanCodeQ = MapVirtualKeyA('Q', MAPVK_VK_TO_VSC);
     UINT scanCodeC = MapVirtualKeyA('C', MAPVK_VK_TO_VSC);
 
-    // send C down
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = scanCodeC;
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 1;
-    }
+    if (!SendInput_Key(scanCodeC)) return FALSE;
+    if (delay_CacheGlitch[0] > 0) delayUS(delay_CacheGlitch[0]);
+    if (!SendInput_Key(scanCodeQ)) return FALSE;
+    if (delay_CacheGlitch[1] > 0) delayUS(delay_CacheGlitch[1]);
+    if (!SendInput_Key(scanCodeQ, KEYEVENTF_KEYUP)) return FALSE;
+    if (delay_CacheGlitch[2] > 0) delayUS(delay_CacheGlitch[2]);
+    if (!SendInput_Key(scanCodeC, KEYEVENTF_KEYUP)) return FALSE;
 
-    if (delay_CacheGlitch > 0) Sleep(delay_CacheGlitch);
+    return TRUE;
+}
 
-    // send Q down
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = scanCodeQ;
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 1;
-    }
+// This is the actual adjacency glitch: 'E' + LMB
+bool DoAdjacencyGlitch() {
+    UINT scanCodeE = MapVirtualKeyA('E', MAPVK_VK_TO_VSC);
 
-    Sleep(5);
+    if (!SendInput_Key(scanCodeE)) return FALSE;
+    if (delay_AdjacencyGlitch[0] > 0) delayUS(delay_AdjacencyGlitch[0]);
+    if (!SendInput_Mouse(MOUSEEVENTF_LEFTDOWN)) return FALSE;
+    if (delay_AdjacencyGlitch[1] > 0) delayUS(delay_AdjacencyGlitch[1]);
+    if (!SendInput_Key(scanCodeE, KEYEVENTF_KEYUP)) return FALSE;
+    if (delay_AdjacencyGlitch[2] > 0) delayUS(delay_AdjacencyGlitch[2]);
+    if (!SendInput_Mouse(MOUSEEVENTF_LEFTUP)) return FALSE;
 
-    // send Q up
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = scanCodeQ; //0
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 1;
-    }
-
-    Sleep(5);
-
-    // send C up
-    ZeroMemory(inputs, sizeof(inputs));
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wScan = scanCodeC; //0
-    inputs[0].ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
-    nSent = SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
-    if (nSent != ARRAYSIZE(inputs)) {
-        // error
-        return 2;
-    }
-
-    return 0;
+    return TRUE;
 }
 
 
@@ -181,21 +166,31 @@ int CacheGlitch() {
 LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
     WORD mouseXButton;
+    bool isCtrlPressed;
     PMSLLHOOKSTRUCT pStruct = reinterpret_cast<PMSLLHOOKSTRUCT>(lParam);
 
     if (nCode == HC_ACTION) {
         if (pStruct) {
             switch (wParam) { // message
             case WM_XBUTTONUP:
+                isCtrlPressed = (GetKeyState(VK_LCONTROL) & 0x8000);
                 mouseXButton = HIWORD(pStruct->mouseData);
                 switch (mouseXButton) {
                 case XBUTTON1:
-                    // Let the installer-thread execute the glitching.
-                    // Just send it a message to start doing so..
-                    PostThreadMessage(InstallerThreadId, WM_APP, 0, 1);
+                    // If the ctrl-key is not pressed, we do a cache-glitch.
+                    // If the ctrl-key is pressed, we do an adjacency-glitch.
+                    if (isCtrlPressed) {
+                        // Let the installer-thread execute the glitching.
+                        // Just send it a message to start doing so..
+                        // This keeps the handler itself responsive/fast.
+                        PostThreadMessage(InstallerThreadId, WM_APP, 0, MSG_DO_ADJACENCYGLITCH);
+                    }
+                    else {
+                        PostThreadMessage(InstallerThreadId, WM_APP, 0, MSG_DO_CACHEGLITCH);
+                    }
                     break;
                 case XBUTTON2:
-                    PostThreadMessage(InstallerThreadId, WM_APP, 0, 2);
+                    PostThreadMessage(InstallerThreadId, WM_APP, 0, MSG_DO_WIREGLITCH);
                     break;
                 }
 
@@ -208,36 +203,43 @@ LRESULT CALLBACK mouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 }
 
 
-// The installer thread that tries to set the hook.
-// It also listens to messages from the mouse-handler to execute the glitching.
+// The installer thread that hooks the mouse handler.
+// It also listens to messages from the mouse-handler to start executing the glitching.
 DWORD WINAPI installHook(LPVOID lpParm)
 {
+    WORD color;
     MSG message;
-    int result;
     HWND rHwnd;              // window handle of NMS
     DWORD pid = 0;           // processId of NMS
     HINSTANCE hInstance = GetModuleHandle(NULL);
 
+    printf("Reading Performance Frequency.. ");
+    if (QueryPerformanceFrequency(reinterpret_cast<LARGE_INTEGER*>(&qpcFrequency))) {
+        printf("%lld Hz\n", qpcFrequency);
+    }
+    else {
+        return errorOut(1, "Error: The Performance Frequency can not be read", "\n");
+    }
 
     printf("Searching for 'No Man's Sky'.. ");
     rHwnd = FindWindow(NULL, L"No Man's Sky");
-    if (!rHwnd) return errorOut(1, "Error: The game must be running.\n");
-    printf("hWnd = %p.\n", rHwnd);
+    if (!rHwnd) return errorOut(2, "Error: The game must be running", "\n");
+    printf("hWnd = %p\n", rHwnd);
 
 
-    printf("Getting the NMS threadId.. ");
+    printf("Getting the NMS thread.. ");
     NMSthreadId = GetWindowThreadProcessId(rHwnd, &pid);
-    if (!NMSthreadId) return errorOut(2, "Error: Can not get the threadId.\n");
-    printf("%d.\n", NMSthreadId);
+    if (!NMSthreadId) return errorOut(3, "Error: Can not get the threadId", "\n");
+    printf("threadId = %d\n", NMSthreadId);
 
 
     printf("Hooking.. ");
     hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, hInstance, 0);
-    if (!hMouseHook) return errorOut(3, "Error: Can not create the hook.\n");
-    printf("It's all hooked now.\n");
+    if (!hMouseHook) return errorOut(4, "Error: Can not create the hook", "\n");
+    printf("successful\n");
 
 
-    printColored("Happy glitchbuilding..\n", COLOR_OK);
+    printColored(COLOR_OK, "Happy glitchbuilding..", "\n");
 
 
     // Keep pumping messages
@@ -245,31 +247,21 @@ DWORD WINAPI installHook(LPVOID lpParm)
         // a message from the callback routine ?
         if (message.message == WM_APP) {
             switch (message.lParam) {
-            case 1:
-                // Wire Glitch ('Q' + left mouse click)
-                printf("XBUTTON1");
-                result = WireGlitch();
-                if (result != 0) {
-                    printColored(" Wire Glitch\n", COLOR_ERROR);
-                }
-                else {
-                    printf(" Wire Glitch");
-                }
-                
+            case MSG_DO_WIREGLITCH:
+                color = (DoWireGlitch()) ? COLOR_DEFAULT : COLOR_ERROR;
+                printColored(color, "Wire Glitch", "\n");
                 break;
-            case 2:
-                // Cache Object ('Q' + 'C')
-                printf("XBUTTON2 Cache Glitch\n");
-                result = CacheGlitch();
-                if (result != 0) {
-                    printColored(" Cache Glitch\n", COLOR_ERROR);
-                }
-                else {
-                    printf(" Cache Glitch");
-                }
+           case MSG_DO_CACHEGLITCH:
+                color = (DoCacheGlitch()) ? COLOR_DEFAULT : COLOR_ERROR;
+                printColored(color, "Cache Glitch", "\n");
+                break;
+            case MSG_DO_ADJACENCYGLITCH:
+                color = (DoAdjacencyGlitch()) ? COLOR_DEFAULT : COLOR_ERROR;
+                printColored(color, "Adjacency Glitch", "\n");
                 break;
             }
-        }
+    }
+        // process the message
         else {
             TranslateMessage(&message);
             DispatchMessage(&message);
@@ -278,8 +270,8 @@ DWORD WINAPI installHook(LPVOID lpParm)
 
 
     printf("Unhooking mouse.. ");
-    if (UnhookWindowsHookEx(hMouseHook) == 0) return errorOut(4, "Failed\n");
-    printf("Done.\n");
+    if (UnhookWindowsHookEx(hMouseHook) == 0) return errorOut(5, "Failed", "\n");
+    printf("Done\n");
 
     return 0;
 }
@@ -288,22 +280,25 @@ DWORD WINAPI installHook(LPVOID lpParm)
 #if defined(VALUES_FROM_FILE)
 void readTimings() {
     // set to default values
-    int wireGlitch = DELAYMS_WIREGLITCH;
-    int cacheGlitch = DELAYMS_CACHEGLITCH;
+    int fWireGlitch[3] = {};
+    int fCacheGlitch[3] = {};
+    int fAdjacencyGlitch[3] = {};
 
     // try to read the values from file
     std::ifstream valuesFile("timings.txt");
     if (valuesFile.is_open()) {
-        valuesFile >> wireGlitch;
-        valuesFile >> cacheGlitch;
+        if (valuesFile >> fWireGlitch[0] >> fWireGlitch[1] >> fWireGlitch[2])
+            if (valuesFile >> fCacheGlitch[0] >> fCacheGlitch[1] >> fCacheGlitch[2])
+                if (valuesFile >> fAdjacencyGlitch[0] >> fAdjacencyGlitch[1] >> fAdjacencyGlitch[2]) {
+                    // if all reading succeeded, set the application variables
+                    std::copy(fWireGlitch, fWireGlitch + 3, delay_WireGlitch);
+                    std::copy(fCacheGlitch, fCacheGlitch + 3, delay_CacheGlitch);
+                    std::copy(fAdjacencyGlitch, fAdjacencyGlitch + 3, delay_AdjacencyGlitch);
+                }
     }
     valuesFile.close();
 
-    // set the application variables
-    delay_WireGlitch = wireGlitch;
-    delay_CacheGlitch = cacheGlitch;
-    printf("     Wire Glitch: %d\n", delay_WireGlitch);
-    printf("    Cache Glitch: %d\n", delay_CacheGlitch);
+    printTimings();
 }
 #endif
 
@@ -312,11 +307,30 @@ int main(int argc, char** argv)
 {
     HANDLE hThread;
 
-    printColored("=== 'No Man's Sky' Glitch Build Tool ===\n\n", COLOR_TITLE);
+    printColored(COLOR_TITLE, "=== 'No Man's Sky' Glitch Build Tool ===", "\n\n");
 
+    // Overwrite existing timing values with data from the arguments.
+    if (argc == 10) {
+        printf("Overwriting timing values read from arguments.. \n");
+        delay_WireGlitch[0] = argToTiming(argv[1]);
+        delay_WireGlitch[1] = argToTiming(argv[2]);
+        delay_WireGlitch[2] = argToTiming(argv[3]);
+        delay_CacheGlitch[0] = argToTiming(argv[4]);
+        delay_CacheGlitch[1] = argToTiming(argv[5]);
+        delay_CacheGlitch[2] = argToTiming(argv[6]);
+        delay_AdjacencyGlitch[0] = argToTiming(argv[7]);
+        delay_AdjacencyGlitch[1] = argToTiming(argv[8]);
+        delay_AdjacencyGlitch[2] = argToTiming(argv[9]);
+        printTimings();
+    }
 #if defined(VALUES_FROM_FILE)
-    printf("Overwriting timing values read from file.. \n");
-    readTimings();
+    // There are not 9 timing values given as arguments.
+    // Try reading values from file.
+    else {
+        // Overwrite default timing values with data from file
+        printf("Overwriting timing values read from file.. \n");
+        readTimings();
+    }
 #endif
 
     // Start a new thread that will install the hook,
