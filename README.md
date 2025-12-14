@@ -37,6 +37,7 @@ Here is an example of how to use your own timing values:
 
 If you compile this application yourself, you can enable reading timing values from file.
 To do so, define the compiler directive: VALUES_FROM_FILE
+
 `
     #define VALUES_FROM_FILE
 `
