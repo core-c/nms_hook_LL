@@ -1,5 +1,5 @@
 ## No Man's Sky Glitchbuilding Tool
-#### nms_hook_LL
+### (nms_hook_LL)
 
 This is a "No Man's Sky" Glitchbuilding Tool.
 
@@ -21,7 +21,7 @@ That is it!
 
 
 
-##### Command Line Arguments
+## Command Line Arguments
 
 You can run this tool from the command line (terminal) and provide all new timing values.
 Be sure to provide all 9 needed values, or it will not work.
@@ -33,7 +33,7 @@ Here is an example of how to use your own timing values:
 
 
 
-##### Info for people who compile this little program
+## Info for people who compile this little program
 
 If you compile this application yourself, you can enable reading timing values from file.
 To do so, define the compiler directive: VALUES_FROM_FILE
