@@ -31,7 +31,7 @@ Here is an example of how to use your own timing values:
     C:\>nms_hook_LL 1000 50000 50000 500 50000 50000 1000 50000 50000
 `
 
-# The meaning of the 9 values
+### The meaning of the 9 values
 
 Each glitch uses 3 values, and there are 3 glitches, so there are 3 groups of 3 values:  
 
@@ -42,7 +42,6 @@ Each glitch uses 3 values, and there are 3 glitches, so there are 3 groups of 3 
 The wire-glitch involves the 'Q'-key and the left-mouse-button. Both actions have a key/button press, and a key/button release.  
 Here is when the delays are executed for the wire-glitch:  
 
-`
     - Press Q-key
 	- Delay <wire1> microseconds
 	- Press Left-Mouse-Button
@@ -50,7 +49,6 @@ Here is when the delays are executed for the wire-glitch:
 	- Release Q-key
 	- Delay <wire3> microseconds
 	- Release Left-Mouse-Button
-`
 
 > The same for the other two glitches.
 
