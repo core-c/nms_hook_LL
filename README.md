@@ -17,6 +17,8 @@ If you press Xbutton 1 while pressing the control-key, it will perform an adjace
 
 That is it!
 
+    ![screenshot](screenshot.png)
+
 > You do not need the file ***timings.txt*** when you do not compile this program yourself.
 
 
