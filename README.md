@@ -25,11 +25,34 @@ That is it!
 
 You can run this tool from the command line (terminal) and provide all new timing values.  
 Be sure to provide all 9 needed values, or it will not work.  
-Here is an example of how to use your own timing values:
+Here is an example of how to use your own timing values:  
 
 `
     C:\>nms_hook_LL 1000 50000 50000 500 50000 50000 1000 50000 50000
 `
+
+# The meaning of the 9 values
+
+Each glitch uses 3 values, and there are 3 glitches, so there are 3 groups of 3 values:  
+
+`
+    nms_hook_LL <wire1> <wire2> <wire3> <cache1> <cache2> <cache3> <adjacency1> <adjacency2> <adjacency3>
+`
+
+The wire-glitch involves the 'Q'-key and the left-mouse-button. Both actions have a key/button press, and a key/button release.  
+Here is when the delays are executed for the wire-glitch:  
+
+`
+    - Press Q-key
+	- Delay <wire1> microseconds
+	- Press Left-Mouse-Button
+	- Delay <wire2> microseconds
+	- Release Q-key
+	- Delay <wire3> microseconds
+	- Release Left-Mouse-Button
+`
+
+> The same for the other two glitches.
 
 
 
