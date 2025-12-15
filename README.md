@@ -82,9 +82,13 @@ Here is when the delays are executed for the wire-glitch:
 
 ### The meaning of the 3 values
 
-When you use only 3 arguments, you provide the values <wire1> <cache1> <adjacency1>.  
+When you use only 3 arguments, you provide the values:
+`
+<wire1> <cache1> <adjacency1>
+`
+
 Those 3 first delays of each glitch are the main/important delays.  
-It is usually enough to tune only these main values to get it to work for you.  
+It should be enough to tune only these main values to get it to work for you.  
 
 
 
@@ -94,12 +98,20 @@ The file named ***timings.txt*** holds all the needed timing values.
 There are 3 glitches, and each glitch occupies a line in the file.  
 Each line has 3 values. The first value (on each line) is the most important one.  
 
-The 1st line are the delays for a wire glitch.
-> <wire1> <wire2> <wire3>  
-The 2nd line are the delays for a cache glitch.  
-> <cache1> <cache2> <cache3>
-The 3rd line are the delays for an adjacency glitch.
-> <adjacency1> <adjacency2> <adjacency3>
+The 1st line of the file contains the delays for a wire glitch.  
+`
+<wire1> <wire2> <wire3>
+`
+
+The 2nd line of the file contains the delays for a cache glitch.  
+`
+<cache1> <cache2> <cache3>
+`
+
+The 3rd line of the file contains the delays for an adjacency glitch.  
+`
+<adjacency1> <adjacency2> <adjacency3>
+`
 
 The program will maintain this file, but you can edit it manually if you like.  
 Just do not mess up the (simple) format.
