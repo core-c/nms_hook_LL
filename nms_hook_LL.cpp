@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #define COLOR_DEFAULT (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)
+#define COLOR_BOLD (COLOR_DEFAULT | FOREGROUND_INTENSITY)
 #define COLOR_ERROR (FOREGROUND_RED | FOREGROUND_INTENSITY)
 #define COLOR_OK (FOREGROUND_GREEN | FOREGROUND_INTENSITY)
 #define COLOR_TITLE (BACKGROUND_RED | BACKGROUND_GREEN)
@@ -18,7 +19,7 @@
 // The third line contains the delay for the adjacency glitch. The default values are: 1000 62400 78000.
 //
 // '#define' or '#undef' to select a different compiled version.
-#undef VALUES_FROM_FILE
+#define VALUES_FROM_FILE
 
 #if defined(VALUES_FROM_FILE)
 #include <fstream>
@@ -32,7 +33,7 @@
 #define MSG_DO_ADJACENCYGLITCH 3
 
 // The timing value variables. Units are microseconds.
-int delay_WireGlitch[3]         = { 1000, 50000, 50000 };
+int delay_WireGlitch[3]         = {  750, 50000, 50000 };
 int delay_CacheGlitch[3]        = {  500, 50000, 50000 };
 int delay_AdjacencyGlitch[3]    = { 1000, 50000, 50000 };
 
@@ -69,7 +70,7 @@ void printTimings() {
     printf("     Cache Glitch: %d %d %d  \n", delay_CacheGlitch[0], delay_CacheGlitch[1], delay_CacheGlitch[2]);
     printf(" Adjacency Glitch: %d %d %d  ", delay_AdjacencyGlitch[0], delay_AdjacencyGlitch[1], delay_AdjacencyGlitch[2]);
     SetConsoleTextAttribute(hConsole, COLOR_DEFAULT); // restore
-    printf("\n");
+    printf("\n\n");
 }
 
 // Sleep() does not wait for milliseconds at all.
@@ -279,10 +280,11 @@ DWORD WINAPI installHook(LPVOID lpParm)
 
 #if defined(VALUES_FROM_FILE)
 void readTimings() {
+    bool result = FALSE;
     // set to default values
-    int fWireGlitch[3] = {};
-    int fCacheGlitch[3] = {};
-    int fAdjacencyGlitch[3] = {};
+    int fWireGlitch[3] = { delay_WireGlitch[0], delay_WireGlitch[1], delay_WireGlitch[2] };
+    int fCacheGlitch[3] = { delay_CacheGlitch[0], delay_CacheGlitch[1], delay_CacheGlitch[2] };
+    int fAdjacencyGlitch[3] = { delay_AdjacencyGlitch[0], delay_AdjacencyGlitch[1], delay_AdjacencyGlitch[2] };
 
     // try to read the values from file
     std::ifstream valuesFile("timings.txt");
@@ -294,11 +296,26 @@ void readTimings() {
                     std::copy(fWireGlitch, fWireGlitch + 3, delay_WireGlitch);
                     std::copy(fCacheGlitch, fCacheGlitch + 3, delay_CacheGlitch);
                     std::copy(fAdjacencyGlitch, fAdjacencyGlitch + 3, delay_AdjacencyGlitch);
+                    result = TRUE;
                 }
     }
     valuesFile.close();
+    if (result) printColored(COLOR_OK, "Loaded", "");
+           else printColored(COLOR_ERROR, "Failed to load", "");
+}
 
-    printTimings();
+void writeTimings() {
+    bool result = FALSE;
+    std::ofstream valuesFile("timings.txt");
+    if (valuesFile.is_open()) {
+        if (valuesFile << delay_WireGlitch[0] << " " << delay_WireGlitch[1] << " " << delay_WireGlitch[2] << "\n")
+            if (valuesFile << delay_CacheGlitch[0] << " " << delay_CacheGlitch[1] << " " << delay_CacheGlitch[2] << "\n")
+                if (valuesFile << delay_AdjacencyGlitch[0] << " " << delay_AdjacencyGlitch[1] << " " << delay_AdjacencyGlitch[2] << "\n")
+                    result = TRUE;
+    }
+    valuesFile.close();
+    if (result) printColored(COLOR_OK, "Saved", "");
+           else printColored(COLOR_ERROR, "Failed to save", "");
 }
 #endif
 
@@ -309,9 +326,10 @@ int main(int argc, char** argv)
 
     printColored(COLOR_TITLE, "=== 'No Man's Sky' Glitch Build Tool ===", "\n\n");
 
-    // Overwrite existing timing values with data from the arguments.
-    if (argc == 10) {
-        printf("Overwriting timing values read from arguments.. \n");
+    switch (argc) {
+    case 10: // CLI 10 arguments? (specify all timing values)
+    case 11: // or 11 arguments?  trailing 's' (save values)
+        printf("Using all timing values read from arguments.. ");
         delay_WireGlitch[0] = argToTiming(argv[1]);
         delay_WireGlitch[1] = argToTiming(argv[2]);
         delay_WireGlitch[2] = argToTiming(argv[3]);
@@ -321,17 +339,44 @@ int main(int argc, char** argv)
         delay_AdjacencyGlitch[0] = argToTiming(argv[7]);
         delay_AdjacencyGlitch[1] = argToTiming(argv[8]);
         delay_AdjacencyGlitch[2] = argToTiming(argv[9]);
+        // save the values to file?
+        if (argc == 11 && strcmp(argv[10], "s") == 0) {
+            writeTimings();
+        }
+        printf("\n");
         printTimings();
-    }
+        break;
+    case 4: // CLI 3 arguments? (specify only main timing values)
+    case 5: // or 4 arguments?  trailing 's' (save values)
+        printf("Using main timing values read from arguments.. ");
+        delay_WireGlitch[0] = argToTiming(argv[1]);
+        delay_CacheGlitch[0] = argToTiming(argv[2]);
+        delay_AdjacencyGlitch[0] = argToTiming(argv[3]);
+        // save the values to file?
+        if (argc == 5 && strcmp(argv[4], "s") == 0) {
+            writeTimings();
+        }
+        printf("\n");
+        printTimings();
+        break;
+    case 2: // Show only the current timings ?
+        if (strcmp(argv[1], "t") == 0) {
+            printf("Current timing values:\n");
+            printTimings();
+            return 0; // exit the application
+        }
+        break;
+    default:
 #if defined(VALUES_FROM_FILE)
-    // There are not 9 timing values given as arguments.
-    // Try reading values from file.
-    else {
-        // Overwrite default timing values with data from file
-        printf("Overwriting timing values read from file.. \n");
+        // There are no arguments provided on the command line.
+        // Try reading values from file.
+        printf("Using timing values read from file.. ");
         readTimings();
-    }
+        printf("\n");
+        printTimings();
 #endif
+        break;
+    }
 
     // Start a new thread that will install the hook,
     // and stays listening to messages from the hook procedure for when to glitchbuild.
