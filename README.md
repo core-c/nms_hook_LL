@@ -52,7 +52,6 @@ To save the values to file, append an extra argument 's' to your values, like so
 `
     C:\>nms_hook_LL 750 500 1000 s
 `
-
 or:  
 `
     C:\>nms_hook_LL 750 50000 50000 500 50000 50000 1000 50000 50000 s
